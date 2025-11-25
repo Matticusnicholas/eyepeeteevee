@@ -1,0 +1,23 @@
+{
+  "name": "EyePeeTeevee",
+  "short_name": "EyePeeTeevee",
+  "description": "Free IPTV Player with Xtream Codes and M3U support",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#111827",
+  "theme_color": "#1e40af",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "categories": ["entertainment", "video"]
+}
