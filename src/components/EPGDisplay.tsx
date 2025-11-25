@@ -1,256 +1,331 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState, useRef, useEffect } from 'react';
 import { useIPTVStore } from '@/store';
-import type { EPGProgram } from '@/types';
-import { Clock, ChevronLeft, ChevronRight } from 'lucide-react';
+import type { EPGProgram, LiveStream } from '@/types';
+import { Clock, ChevronUp, ChevronDown, X, Tv, Info } from 'lucide-react';
 
-interface EPGDisplayProps {
-  channelId?: string;
-  compact?: boolean;
-}
-
-export default function EPGDisplay({ channelId, compact = false }: EPGDisplayProps) {
+// Mini EPG overlay that shows current program on the video
+export function EPGMiniOverlay() {
   const { epgData, activeStreams, liveStreams } = useIPTVStore();
+  const [isVisible, setIsVisible] = useState(true);
 
-  // Get EPG for current channel
-  const currentEPG = useMemo(() => {
-    if (!channelId && activeStreams.length > 0) {
-      // Try to find EPG by matching stream
-      const currentStream = activeStreams[0];
-      const stream = liveStreams.find((s) => s.stream_id === currentStream.streamId);
-      if (stream?.epg_channel_id) {
-        return epgData[stream.epg_channel_id] || [];
-      }
-    }
-    return channelId ? epgData[channelId] || [] : [];
-  }, [epgData, channelId, activeStreams, liveStreams]);
+  const currentProgram = useMemo(() => {
+    if (activeStreams.length === 0) return null;
 
-  const now = new Date();
+    const currentStream = activeStreams[0];
+    const stream = liveStreams.find((s) => s.stream_id === currentStream.streamId);
+    if (!stream?.epg_channel_id) return null;
 
-  // Find current and upcoming programs
-  const { currentProgram, upcomingPrograms } = useMemo(() => {
-    const current = currentEPG.find((p) => {
+    const programs = epgData[stream.epg_channel_id] || [];
+    const now = new Date();
+
+    return programs.find((p) => {
       const start = new Date(p.start);
       const end = new Date(p.end);
       return now >= start && now < end;
     });
+  }, [epgData, activeStreams, liveStreams]);
 
-    const upcoming = currentEPG
-      .filter((p) => new Date(p.start) > now)
-      .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
-      .slice(0, 5);
+  if (!currentProgram || !isVisible) return null;
 
-    return { currentProgram: current, upcomingPrograms: upcoming };
-  }, [currentEPG, now]);
-
-  if (currentEPG.length === 0) {
-    return null;
-  }
-
-  if (compact) {
-    return (
-      <div className="bg-gray-800/80 backdrop-blur px-4 py-2 rounded-lg">
-        {currentProgram ? (
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1 text-green-400 text-xs">
-              <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
-              LIVE
-            </div>
-            <span className="text-white text-sm font-medium truncate">
-              {currentProgram.title}
-            </span>
-            <span className="text-gray-400 text-xs">
-              {formatTime(new Date(currentProgram.start))} - {formatTime(new Date(currentProgram.end))}
-            </span>
-          </div>
-        ) : (
-          <span className="text-gray-400 text-sm">No program info available</span>
-        )}
-      </div>
-    );
-  }
+  const start = new Date(currentProgram.start);
+  const end = new Date(currentProgram.end);
+  const now = new Date();
+  const progress = ((now.getTime() - start.getTime()) / (end.getTime() - start.getTime())) * 100;
 
   return (
-    <div className="bg-gray-900 border-t border-gray-800">
-      {/* Current Program */}
-      {currentProgram && (
-        <div className="p-4 border-b border-gray-800">
-          <div className="flex items-start gap-3">
-            <div className="flex items-center gap-1 text-green-400 text-xs bg-green-400/10 px-2 py-1 rounded">
-              <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
-              NOW
-            </div>
-            <div className="flex-1">
-              <h3 className="text-white font-medium">{currentProgram.title}</h3>
-              <p className="text-gray-400 text-sm mt-1">
-                {formatTime(new Date(currentProgram.start))} - {formatTime(new Date(currentProgram.end))}
-              </p>
-              {currentProgram.description && (
-                <p className="text-gray-500 text-sm mt-2 line-clamp-2">
-                  {currentProgram.description}
-                </p>
-              )}
-              {/* Progress bar */}
-              <div className="mt-3 h-1 bg-gray-700 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-blue-500 rounded-full"
-                  style={{
-                    width: `${getProgress(new Date(currentProgram.start), new Date(currentProgram.end))}%`,
-                  }}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Upcoming Programs */}
-      {upcomingPrograms.length > 0 && (
-        <div className="p-4">
-          <h4 className="text-gray-400 text-xs uppercase tracking-wider mb-3 flex items-center gap-2">
-            <Clock className="w-3 h-3" />
-            Coming Up
-          </h4>
-          <div className="space-y-2">
-            {upcomingPrograms.map((program, idx) => (
-              <div
-                key={program.id || idx}
-                className="flex items-center gap-3 text-sm"
-              >
-                <span className="text-gray-500 w-16 flex-shrink-0">
-                  {formatTime(new Date(program.start))}
-                </span>
-                <span className="text-gray-300 truncate">{program.title}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+    <div className="absolute bottom-20 left-4 right-4 bg-black/80 backdrop-blur-sm rounded-lg p-3 animate-fade-in">
+      <button
+        onClick={() => setIsVisible(false)}
+        className="absolute top-2 right-2 p-1 text-gray-400 hover:text-white"
+      >
+        <X className="w-4 h-4" />
+      </button>
+      <div className="flex items-center gap-2 mb-1">
+        <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+        <span className="text-red-400 text-xs font-medium">LIVE</span>
+      </div>
+      <h3 className="text-white font-medium text-sm truncate pr-6">{currentProgram.title}</h3>
+      <p className="text-gray-400 text-xs mt-1">
+        {formatTime(start)} - {formatTime(end)}
+      </p>
+      <div className="mt-2 h-1 bg-gray-700 rounded-full overflow-hidden">
+        <div
+          className="h-full bg-blue-500 rounded-full transition-all"
+          style={{ width: `${Math.min(100, progress)}%` }}
+        />
+      </div>
     </div>
   );
 }
 
-// EPG Timeline component for horizontal scrolling view
-export function EPGTimeline() {
-  const { epgData, liveStreams, playStream, credentials } = useIPTVStore();
-  const now = new Date();
+// EPG Drawer that slides up from bottom
+interface EPGDrawerProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+export function EPGDrawer({ isOpen, onClose }: EPGDrawerProps) {
+  const { epgData, liveStreams, playStream, credentials, activeStreams } = useIPTVStore();
+  const [selectedChannel, setSelectedChannel] = useState<LiveStream | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   // Get channels with EPG data
   const channelsWithEPG = useMemo(() => {
-    return liveStreams
-      .filter((stream) => stream.epg_channel_id && epgData[stream.epg_channel_id]?.length > 0)
-      .slice(0, 20);
+    return liveStreams.filter(
+      (stream) => stream.epg_channel_id && epgData[stream.epg_channel_id]?.length > 0
+    );
   }, [liveStreams, epgData]);
 
-  if (channelsWithEPG.length === 0) {
-    return (
-      <div className="bg-gray-900 p-8 text-center">
-        <Clock className="w-12 h-12 text-gray-700 mx-auto mb-4" />
-        <p className="text-gray-500">No EPG data available</p>
-        <p className="text-gray-600 text-sm mt-2">
-          EPG data is being loaded in the background
-        </p>
-      </div>
-    );
-  }
+  // Auto-select current channel
+  useEffect(() => {
+    if (activeStreams.length > 0 && !selectedChannel) {
+      const current = liveStreams.find((s) => s.stream_id === activeStreams[0].streamId);
+      if (current) setSelectedChannel(current);
+    }
+  }, [activeStreams, liveStreams, selectedChannel]);
 
-  // Generate time slots for 4 hours
-  const timeSlots = [];
-  const startTime = new Date(now);
-  startTime.setMinutes(0, 0, 0);
-  for (let i = 0; i < 8; i++) {
-    const time = new Date(startTime.getTime() + i * 30 * 60000);
-    timeSlots.push(time);
-  }
+  const selectedEPG = useMemo(() => {
+    if (!selectedChannel?.epg_channel_id) return [];
+    const programs = epgData[selectedChannel.epg_channel_id] || [];
+    const now = new Date();
+    // Show programs from now onwards
+    return programs
+      .filter((p) => new Date(p.end) > now)
+      .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
+      .slice(0, 20);
+  }, [selectedChannel, epgData]);
+
+  if (!isOpen) return null;
+
+  const handlePlayChannel = (stream: LiveStream) => {
+    if (!credentials || credentials.type !== 'xtream') return;
+
+    const { XtreamAPI } = require('@/lib/xtream-api');
+    const api = new XtreamAPI(credentials);
+
+    playStream({
+      streamId: stream.stream_id,
+      name: stream.name,
+      url: api.getLiveStreamUrl(stream.stream_id),
+      type: 'live',
+      logo: stream.stream_icon,
+    });
+  };
 
   return (
-    <div className="bg-gray-900 overflow-x-auto">
-      {/* Time header */}
-      <div className="flex border-b border-gray-800 sticky top-0 bg-gray-900 z-10">
-        <div className="w-48 flex-shrink-0 p-2 border-r border-gray-800">
-          <span className="text-gray-400 text-sm">Channel</span>
+    <div className="fixed inset-0 z-50 pointer-events-none">
+      {/* Backdrop */}
+      <div
+        className="absolute inset-0 bg-black/50 pointer-events-auto"
+        onClick={onClose}
+      />
+
+      {/* Drawer */}
+      <div className="absolute bottom-0 left-0 right-0 bg-gray-900 rounded-t-2xl pointer-events-auto max-h-[70vh] flex flex-col animate-slide-up">
+        {/* Handle */}
+        <div className="flex justify-center pt-2 pb-1">
+          <div className="w-12 h-1 bg-gray-600 rounded-full" />
         </div>
-        {timeSlots.map((time, idx) => (
-          <div key={idx} className="w-32 flex-shrink-0 p-2 text-gray-400 text-sm border-r border-gray-800">
-            {formatTime(time)}
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-2 border-b border-gray-800">
+          <h2 className="text-white font-semibold flex items-center gap-2">
+            <Clock className="w-5 h-5 text-blue-400" />
+            TV Guide
+          </h2>
+          <button
+            onClick={onClose}
+            className="p-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg"
+          >
+            <ChevronDown className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 flex overflow-hidden">
+          {/* Channel List */}
+          <div className="w-32 sm:w-40 border-r border-gray-800 overflow-y-auto flex-shrink-0">
+            {channelsWithEPG.length > 0 ? (
+              channelsWithEPG.map((stream) => (
+                <button
+                  key={stream.stream_id}
+                  onClick={() => setSelectedChannel(stream)}
+                  className={`w-full p-2 flex items-center gap-2 text-left transition-colors ${
+                    selectedChannel?.stream_id === stream.stream_id
+                      ? 'bg-blue-600 text-white'
+                      : 'text-gray-300 hover:bg-gray-800'
+                  }`}
+                >
+                  {stream.stream_icon ? (
+                    <img
+                      src={stream.stream_icon}
+                      alt=""
+                      className="w-8 h-8 object-contain flex-shrink-0"
+                    />
+                  ) : (
+                    <div className="w-8 h-8 bg-gray-700 rounded flex items-center justify-center flex-shrink-0">
+                      <Tv className="w-4 h-4 text-gray-500" />
+                    </div>
+                  )}
+                  <span className="text-xs truncate">{stream.name}</span>
+                </button>
+              ))
+            ) : (
+              <div className="p-4 text-center">
+                <p className="text-gray-500 text-sm">No EPG data</p>
+              </div>
+            )}
           </div>
-        ))}
+
+          {/* Program List */}
+          <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden">
+            {selectedChannel ? (
+              selectedEPG.length > 0 ? (
+                <div className="p-2 space-y-1">
+                  {selectedEPG.map((program, idx) => {
+                    const now = new Date();
+                    const start = new Date(program.start);
+                    const end = new Date(program.end);
+                    const isCurrent = now >= start && now < end;
+                    const progress = isCurrent
+                      ? ((now.getTime() - start.getTime()) / (end.getTime() - start.getTime())) * 100
+                      : 0;
+
+                    return (
+                      <div
+                        key={program.id || idx}
+                        className={`p-3 rounded-lg transition-colors ${
+                          isCurrent ? 'bg-blue-600/20 border border-blue-500/50' : 'bg-gray-800/50 hover:bg-gray-800'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              {isCurrent && (
+                                <span className="px-1.5 py-0.5 bg-red-500 text-white text-[10px] font-bold rounded">
+                                  LIVE
+                                </span>
+                              )}
+                              <span className="text-gray-400 text-xs">
+                                {formatTime(start)}
+                              </span>
+                            </div>
+                            <h4 className="text-white font-medium text-sm mt-1 truncate">
+                              {program.title}
+                            </h4>
+                            {program.description && (
+                              <p className="text-gray-500 text-xs mt-1 line-clamp-2">
+                                {program.description}
+                              </p>
+                            )}
+                            {isCurrent && (
+                              <div className="mt-2 h-1 bg-gray-700 rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-blue-500 rounded-full"
+                                  style={{ width: `${progress}%` }}
+                                />
+                              </div>
+                            )}
+                          </div>
+                          <span className="text-gray-500 text-xs flex-shrink-0">
+                            {formatDuration(start, end)}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="flex items-center justify-center h-full p-8">
+                  <div className="text-center">
+                    <Info className="w-10 h-10 text-gray-600 mx-auto mb-2" />
+                    <p className="text-gray-500 text-sm">No program info available</p>
+                  </div>
+                </div>
+              )
+            ) : (
+              <div className="flex items-center justify-center h-full p-8">
+                <div className="text-center">
+                  <Tv className="w-10 h-10 text-gray-600 mx-auto mb-2" />
+                  <p className="text-gray-500 text-sm">Select a channel to view guide</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Play Button */}
+        {selectedChannel && (
+          <div className="p-4 border-t border-gray-800">
+            <button
+              onClick={() => handlePlayChannel(selectedChannel)}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 rounded-lg flex items-center justify-center gap-2"
+            >
+              <Tv className="w-5 h-5" />
+              Watch {selectedChannel.name}
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Channel rows */}
-      {channelsWithEPG.map((stream) => {
-        const programs = epgData[stream.epg_channel_id] || [];
-        const visiblePrograms = programs.filter((p) => {
-          const end = new Date(p.end);
-          const start = new Date(p.start);
-          return end > startTime && start < new Date(startTime.getTime() + 4 * 60 * 60000);
-        });
-
-        return (
-          <div key={stream.stream_id} className="flex border-b border-gray-800">
-            <div className="w-48 flex-shrink-0 p-2 border-r border-gray-800 flex items-center gap-2">
-              {stream.stream_icon && (
-                <img src={stream.stream_icon} alt="" className="w-8 h-8 object-contain" />
-              )}
-              <span className="text-white text-sm truncate">{stream.name}</span>
-            </div>
-            <div className="flex-1 relative h-16 flex">
-              {visiblePrograms.map((program, idx) => {
-                const progStart = new Date(program.start);
-                const progEnd = new Date(program.end);
-                const slotStart = startTime;
-                const slotEnd = new Date(startTime.getTime() + 4 * 60 * 60000);
-
-                // Calculate position and width
-                const startOffset = Math.max(0, (progStart.getTime() - slotStart.getTime()) / (30 * 60000));
-                const duration = (Math.min(progEnd.getTime(), slotEnd.getTime()) -
-                  Math.max(progStart.getTime(), slotStart.getTime())) / (30 * 60000);
-
-                const isCurrent = now >= progStart && now < progEnd;
-
-                return (
-                  <div
-                    key={program.id || idx}
-                    className={`absolute top-1 bottom-1 rounded px-2 py-1 overflow-hidden cursor-pointer transition-colors ${
-                      isCurrent
-                        ? 'bg-blue-600 hover:bg-blue-500'
-                        : 'bg-gray-800 hover:bg-gray-700'
-                    }`}
-                    style={{
-                      left: `${startOffset * 128}px`,
-                      width: `${duration * 128 - 4}px`,
-                    }}
-                    title={`${program.title}\n${formatTime(progStart)} - ${formatTime(progEnd)}`}
-                  >
-                    <span className="text-white text-xs font-medium block truncate">
-                      {program.title}
-                    </span>
-                    <span className="text-gray-300 text-xs">
-                      {formatTime(progStart)}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })}
+      <style jsx>{`
+        @keyframes slide-up {
+          from {
+            transform: translateY(100%);
+          }
+          to {
+            transform: translateY(0);
+          }
+        }
+        .animate-slide-up {
+          animation: slide-up 0.3s ease-out;
+        }
+      `}</style>
     </div>
+  );
+}
+
+// EPG Button to open the drawer
+export function EPGButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex items-center gap-2 px-4 py-2 bg-gray-800/80 hover:bg-gray-700 rounded-lg transition-colors backdrop-blur-sm"
+    >
+      <Clock className="w-4 h-4 text-blue-400" />
+      <span className="text-white text-sm font-medium">Guide</span>
+      <ChevronUp className="w-4 h-4 text-gray-400" />
+    </button>
   );
 }
 
 function formatTime(date: Date): string {
-  return date.toLocaleTimeString('en-US', {
+  return new Date(date).toLocaleTimeString('en-US', {
     hour: 'numeric',
     minute: '2-digit',
     hour12: true,
   });
 }
 
-function getProgress(start: Date, end: Date): number {
-  const now = new Date();
-  const total = end.getTime() - start.getTime();
-  const elapsed = now.getTime() - start.getTime();
-  return Math.min(100, Math.max(0, (elapsed / total) * 100));
+function formatDuration(start: Date, end: Date): string {
+  const durationMs = new Date(end).getTime() - new Date(start).getTime();
+  const minutes = Math.round(durationMs / 60000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+}
+
+// Default export for backwards compatibility
+export default function EPGDisplay() {
+  const [isOpen, setIsOpen] = useState(false);
+
+  return (
+    <>
+      <EPGButton onClick={() => setIsOpen(true)} />
+      <EPGDrawer isOpen={isOpen} onClose={() => setIsOpen(false)} />
+    </>
+  );
 }

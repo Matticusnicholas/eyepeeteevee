@@ -10,6 +10,15 @@ import type {
   EPGProgram,
 } from '@/types';
 
+// Helper to proxy requests through our API to avoid CORS
+function getProxyUrl(url: string): string {
+  // Only proxy in browser environment
+  if (typeof window !== 'undefined') {
+    return `/api/proxy?url=${encodeURIComponent(url)}`;
+  }
+  return url;
+}
+
 export class XtreamAPI {
   private serverUrl: string;
   private username: string;
@@ -37,7 +46,10 @@ export class XtreamAPI {
       });
     }
 
-    const response = await fetch(url);
+    // Use proxy to avoid CORS
+    const proxyUrl = getProxyUrl(url);
+    const response = await fetch(proxyUrl);
+
     if (!response.ok) {
       throw new Error(`API request failed: ${response.status}`);
     }
@@ -105,7 +117,7 @@ export class XtreamAPI {
     return `${this.serverUrl}/xmltv.php?username=${this.username}&password=${this.password}`;
   }
 
-  // Stream URLs
+  // Stream URLs - these go direct (no proxy needed for video)
   getLiveStreamUrl(streamId: number, format: 'ts' | 'm3u8' = 'm3u8'): string {
     return `${this.serverUrl}/live/${this.username}/${this.password}/${streamId}.${format}`;
   }
@@ -128,8 +140,22 @@ export class XtreamAPI {
 // Parse full XMLTV EPG data
 export async function parseXMLTV(xmltvUrl: string): Promise<EPGData> {
   try {
-    const response = await fetch(xmltvUrl);
+    // Use proxy to avoid CORS
+    const proxyUrl = getProxyUrl(xmltvUrl);
+    const response = await fetch(proxyUrl);
+
+    if (!response.ok) {
+      console.error('EPG fetch failed:', response.status);
+      return {};
+    }
+
     const xmlText = await response.text();
+
+    // Check if we got valid XML
+    if (!xmlText || !xmlText.includes('<tv')) {
+      console.error('Invalid EPG data received');
+      return {};
+    }
 
     const { XMLParser } = await import('fast-xml-parser');
     const parser = new XMLParser({
@@ -152,13 +178,14 @@ export async function parseXMLTV(xmltvUrl: string): Promise<EPGData> {
       }
 
       const parseXMLTVDate = (dateStr: string): Date => {
+        if (!dateStr) return new Date();
         // Format: 20231225120000 +0000
         const year = parseInt(dateStr.substring(0, 4));
         const month = parseInt(dateStr.substring(4, 6)) - 1;
         const day = parseInt(dateStr.substring(6, 8));
-        const hour = parseInt(dateStr.substring(8, 10));
-        const minute = parseInt(dateStr.substring(10, 12));
-        const second = parseInt(dateStr.substring(12, 14));
+        const hour = parseInt(dateStr.substring(8, 10)) || 0;
+        const minute = parseInt(dateStr.substring(10, 12)) || 0;
+        const second = parseInt(dateStr.substring(12, 14)) || 0;
         return new Date(Date.UTC(year, month, day, hour, minute, second));
       };
 

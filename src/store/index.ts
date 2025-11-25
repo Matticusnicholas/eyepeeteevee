@@ -23,6 +23,7 @@ interface IPTVState {
   isAuthenticated: boolean;
   isLoading: boolean;
   error: string | null;
+  hasHydrated: boolean;
 
   // Data
   liveCategories: Category[];
@@ -52,6 +53,7 @@ interface IPTVState {
   watchHistory: WatchHistoryItem[];
 
   // Actions
+  setHasHydrated: (state: boolean) => void;
   login: (credentials: IPTVCredentials) => Promise<void>;
   logout: () => void;
   refreshData: () => Promise<void>;
@@ -93,6 +95,7 @@ export const useIPTVStore = create<IPTVState>()(
       isAuthenticated: false,
       isLoading: false,
       error: null,
+      hasHydrated: false,
 
       liveCategories: [],
       liveStreams: [],
@@ -116,6 +119,9 @@ export const useIPTVStore = create<IPTVState>()(
       favorites: [],
       watchHistory: [],
 
+      // Hydration
+      setHasHydrated: (state) => set({ hasHydrated: state }),
+
       // Auth Actions
       login: async (credentials: IPTVCredentials) => {
         set({ isLoading: true, error: null });
@@ -125,7 +131,7 @@ export const useIPTVStore = create<IPTVState>()(
             const api = new XtreamAPI(credentials);
             await api.authenticate();
 
-            // Fetch all data
+            // Fetch all data in parallel
             const [liveCategories, liveStreams, vodCategories, vodStreams, seriesCategories, series] =
               await Promise.all([
                 api.getLiveCategories().catch(() => []),
@@ -148,8 +154,8 @@ export const useIPTVStore = create<IPTVState>()(
               series,
             });
 
-            // Fetch EPG in background
-            get().refreshEPG();
+            // Fetch EPG in background (don't await)
+            setTimeout(() => get().refreshEPG(), 100);
           } else {
             // M3U Login
             const { categories, streams } = await fetchAndParseM3U(credentials.m3uUrl);
@@ -168,7 +174,7 @@ export const useIPTVStore = create<IPTVState>()(
 
             // Fetch EPG if provided
             if (credentials.epgUrl) {
-              get().refreshEPG();
+              setTimeout(() => get().refreshEPG(), 100);
             }
           }
         } catch (error) {
@@ -370,6 +376,9 @@ export const useIPTVStore = create<IPTVState>()(
         watchHistory: state.watchHistory,
         multiScreenConfig: state.multiScreenConfig,
       }),
+      onRehydrateStorage: () => (state) => {
+        state?.setHasHydrated(true);
+      },
     }
   )
 );

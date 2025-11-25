@@ -6,36 +6,48 @@ import LoginForm from '@/components/LoginForm';
 import Header from '@/components/Header';
 import ChannelBrowser from '@/components/ChannelBrowser';
 import MultiScreenPlayer from '@/components/MultiScreenPlayer';
-import EPGDisplay from '@/components/EPGDisplay';
+import { EPGDrawer, EPGButton, EPGMiniOverlay } from '@/components/EPGDisplay';
 import AdBanner from '@/components/AdBanner';
-import { PanelLeftClose, PanelLeft, Calendar } from 'lucide-react';
+import { PanelLeftClose, PanelLeft, Loader2 } from 'lucide-react';
 
 export default function Home() {
-  const { isAuthenticated, credentials } = useIPTVStore();
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [showEPG, setShowEPG] = useState(false);
-  const [isHydrated, setIsHydrated] = useState(false);
+  const {
+    isAuthenticated,
+    credentials,
+    activeStreams,
+    hasHydrated,
+    isLoading,
+  } = useIPTVStore();
 
-  // Handle hydration mismatch
-  useEffect(() => {
-    setIsHydrated(true);
-  }, []);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [epgOpen, setEpgOpen] = useState(false);
+  const [isAutoLogging, setIsAutoLogging] = useState(false);
 
   // Auto-login if credentials are cached
   useEffect(() => {
-    if (isHydrated && credentials && !isAuthenticated) {
-      useIPTVStore.getState().login(credentials).catch(() => {
-        // If auto-login fails, clear credentials
-        useIPTVStore.getState().logout();
-      });
+    if (hasHydrated && credentials && !isAuthenticated && !isAutoLogging) {
+      setIsAutoLogging(true);
+      useIPTVStore
+        .getState()
+        .login(credentials)
+        .catch(() => {
+          // If auto-login fails, clear credentials
+          useIPTVStore.getState().logout();
+        })
+        .finally(() => {
+          setIsAutoLogging(false);
+        });
     }
-  }, [isHydrated, credentials, isAuthenticated]);
+  }, [hasHydrated, credentials, isAuthenticated, isAutoLogging]);
 
-  // Show loading state during hydration
-  if (!isHydrated) {
+  // Show loading state while hydrating or auto-logging in
+  if (!hasHydrated || isAutoLogging) {
     return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <div className="w-12 h-12 border-4 border-blue-600/30 border-t-blue-600 rounded-full animate-spin" />
+      <div className="min-h-screen bg-gray-900 flex flex-col items-center justify-center gap-4">
+        <Loader2 className="w-12 h-12 text-blue-500 animate-spin" />
+        <p className="text-gray-400">
+          {isAutoLogging ? 'Connecting to your IPTV...' : 'Loading...'}
+        </p>
       </div>
     );
   }
@@ -44,6 +56,8 @@ export default function Home() {
   if (!isAuthenticated) {
     return <LoginForm />;
   }
+
+  const hasActiveStream = activeStreams.length > 0;
 
   return (
     <div className="min-h-screen bg-gray-900 flex flex-col">
@@ -66,7 +80,7 @@ export default function Home() {
           {/* Toggle Sidebar Button */}
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="absolute top-4 left-4 z-10 p-2 bg-gray-800/80 hover:bg-gray-700 rounded-lg transition-colors"
+            className="absolute top-4 left-4 z-10 p-2 bg-gray-800/80 hover:bg-gray-700 rounded-lg transition-colors backdrop-blur-sm"
             title={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}
           >
             {sidebarOpen ? (
@@ -76,31 +90,28 @@ export default function Home() {
             )}
           </button>
 
-          {/* Toggle EPG Button */}
-          <button
-            onClick={() => setShowEPG(!showEPG)}
-            className="absolute top-4 right-4 z-10 p-2 bg-gray-800/80 hover:bg-gray-700 rounded-lg transition-colors"
-            title={showEPG ? 'Hide EPG' : 'Show EPG'}
-          >
-            <Calendar className={`w-5 h-5 ${showEPG ? 'text-blue-400' : 'text-white'}`} />
-          </button>
-
           {/* Video Player */}
-          <div className="flex-1">
+          <div className="flex-1 relative">
             <MultiScreenPlayer />
-          </div>
 
-          {/* EPG Panel */}
-          {showEPG && (
-            <div className="h-48 border-t border-gray-800">
-              <EPGDisplay />
-            </div>
-          )}
+            {/* EPG Mini Overlay - shows current program on video */}
+            {hasActiveStream && <EPGMiniOverlay />}
+
+            {/* EPG Button - bottom center of video */}
+            {hasActiveStream && (
+              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10">
+                <EPGButton onClick={() => setEpgOpen(true)} />
+              </div>
+            )}
+          </div>
         </main>
       </div>
 
       {/* Ad Banner */}
       <AdBanner position="bottom" />
+
+      {/* EPG Drawer */}
+      <EPGDrawer isOpen={epgOpen} onClose={() => setEpgOpen(false)} />
     </div>
   );
 }
