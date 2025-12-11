@@ -141,7 +141,7 @@ export default function ChannelBrowser() {
   const categories = getCategories();
 
   return (
-    <div className="flex flex-col h-full bg-gray-900">
+    <div className="flex flex-col h-full bg-gray-900 min-h-0">
       {/* Header with Tabs */}
       <div className="flex-shrink-0 border-b border-gray-800">
         <div className="flex items-center gap-1 px-2 py-2 overflow-x-auto">
@@ -237,7 +237,7 @@ export default function ChannelBrowser() {
       )}
 
       {/* Content Area - Scrollable Channel List */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 min-h-0 overflow-y-auto">
         {isLoading ? (
           <div className="flex items-center justify-center h-32">
             <Loader2 className="w-6 h-6 text-blue-500 animate-spin" />

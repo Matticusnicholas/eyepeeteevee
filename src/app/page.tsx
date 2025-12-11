@@ -60,19 +60,21 @@ export default function Home() {
   const hasActiveStream = activeStreams.length > 0;
 
   return (
-    <div className="min-h-screen bg-gray-900 flex flex-col">
+    <div className="h-screen bg-gray-900 flex flex-col overflow-hidden">
       {/* Header */}
       <Header />
 
       {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex min-h-0">
         {/* Sidebar - Channel Browser */}
         <aside
           className={`${
             sidebarOpen ? 'w-80 lg:w-96' : 'w-0'
-          } flex-shrink-0 transition-all duration-300 overflow-hidden border-r border-gray-800`}
+          } flex-shrink-0 transition-all duration-300 border-r border-gray-800 overflow-hidden`}
         >
-          <ChannelBrowser />
+          <div className="h-full overflow-hidden">
+            <ChannelBrowser />
+          </div>
         </aside>
 
         {/* Main Player Area */}
