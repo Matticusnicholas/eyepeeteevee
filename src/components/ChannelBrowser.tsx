@@ -12,14 +12,11 @@ import {
   Heart,
   Clock,
   ChevronRight,
+  ChevronDown,
   Play,
   Star,
-  Grid3X3,
-  LayoutGrid,
-  List,
+  Loader2,
 } from 'lucide-react';
-
-type ViewMode = 'grid' | 'list';
 
 export default function ChannelBrowser() {
   const {
@@ -39,10 +36,10 @@ export default function ChannelBrowser() {
     favorites,
     watchHistory,
     playStream,
-    multiScreenConfig,
+    isLoading,
   } = useIPTVStore();
 
-  const [viewMode, setViewMode] = useState<ViewMode>('grid');
+  const [showCategories, setShowCategories] = useState(true);
 
   // Filter streams based on search and category
   const filteredLiveStreams = useMemo(() => {
@@ -94,6 +91,11 @@ export default function ChannelBrowser() {
     }
   };
 
+  const getCategoryName = (categoryId: string): string => {
+    const categories = getCategories();
+    return categories.find((c) => c.category_id === categoryId)?.category_name || 'Unknown';
+  };
+
   const handlePlayLive = (stream: LiveStream) => {
     if (!credentials || credentials.type !== 'xtream') return;
 
@@ -141,368 +143,351 @@ export default function ChannelBrowser() {
   return (
     <div className="flex flex-col h-full bg-gray-900">
       {/* Header with Tabs */}
-      <div className="border-b border-gray-800">
-        <div className="flex items-center justify-between px-4 py-3">
-          <div className="flex gap-1">
-            {[
-              { id: 'live', label: 'Live TV', icon: Tv },
-              { id: 'vod', label: 'Movies', icon: Film },
-              { id: 'series', label: 'Series', icon: Video },
-              { id: 'favorites', label: 'Favorites', icon: Heart },
-            ].map(({ id, label, icon: Icon }) => (
-              <button
-                key={id}
-                onClick={() => setActiveTab(id as typeof activeTab)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  activeTab === id
-                    ? 'bg-blue-600 text-white'
-                    : 'text-gray-400 hover:text-white hover:bg-gray-800'
-                }`}
-              >
-                <Icon className="w-4 h-4" />
-                <span className="hidden sm:inline">{label}</span>
-              </button>
-            ))}
-          </div>
-
-          <div className="flex items-center gap-2">
-            {/* View Mode Toggle */}
-            <div className="flex bg-gray-800 rounded-lg p-1">
-              <button
-                onClick={() => setViewMode('grid')}
-                className={`p-1.5 rounded ${viewMode === 'grid' ? 'bg-gray-700' : ''}`}
-              >
-                <LayoutGrid className="w-4 h-4 text-gray-400" />
-              </button>
-              <button
-                onClick={() => setViewMode('list')}
-                className={`p-1.5 rounded ${viewMode === 'list' ? 'bg-gray-700' : ''}`}
-              >
-                <List className="w-4 h-4 text-gray-400" />
-              </button>
-            </div>
-          </div>
+      <div className="flex-shrink-0 border-b border-gray-800">
+        <div className="flex items-center gap-1 px-2 py-2 overflow-x-auto">
+          {[
+            { id: 'live', label: 'Live TV', icon: Tv },
+            { id: 'vod', label: 'Movies', icon: Film },
+            { id: 'series', label: 'Series', icon: Video },
+            { id: 'favorites', label: 'Favorites', icon: Heart },
+          ].map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              onClick={() => setActiveTab(id as typeof activeTab)}
+              className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
+                activeTab === id
+                  ? 'bg-blue-600 text-white'
+                  : 'text-gray-400 hover:text-white hover:bg-gray-800'
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              {label}
+            </button>
+          ))}
         </div>
 
         {/* Search Bar */}
-        <div className="px-4 pb-3">
+        <div className="px-3 pb-3">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search channels, movies, series..."
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg py-2 pl-11 pr-4 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+              placeholder="Search..."
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg py-2 pl-10 pr-4 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500"
             />
           </div>
         </div>
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
-        {/* Categories Sidebar */}
-        {activeTab !== 'favorites' && categories.length > 0 && (
-          <div className="w-48 lg:w-56 border-r border-gray-800 overflow-y-auto flex-shrink-0">
-            <button
-              onClick={() => setSelectedCategory(null)}
-              className={`w-full text-left px-4 py-2.5 text-sm flex items-center justify-between ${
-                !selectedCategory ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-800'
-              }`}
-            >
-              <span>All Channels</span>
-              <ChevronRight className="w-4 h-4" />
-            </button>
-            {categories.map((cat) => (
+      {/* Categories Dropdown (for Live/VOD/Series) */}
+      {activeTab !== 'favorites' && categories.length > 0 && (
+        <div className="flex-shrink-0 border-b border-gray-800">
+          <button
+            onClick={() => setShowCategories(!showCategories)}
+            className="w-full px-3 py-2 flex items-center justify-between text-sm text-gray-300 hover:bg-gray-800"
+          >
+            <span className="font-medium">
+              {selectedCategory ? getCategoryName(selectedCategory) : 'All Channels'}
+            </span>
+            <ChevronDown
+              className={`w-4 h-4 transition-transform ${showCategories ? 'rotate-180' : ''}`}
+            />
+          </button>
+
+          {showCategories && (
+            <div className="max-h-48 overflow-y-auto border-t border-gray-800 bg-gray-850">
               <button
-                key={cat.category_id}
-                onClick={() => setSelectedCategory(cat.category_id)}
-                className={`w-full text-left px-4 py-2.5 text-sm flex items-center justify-between ${
-                  selectedCategory === cat.category_id
+                onClick={() => {
+                  setSelectedCategory(null);
+                  setShowCategories(false);
+                }}
+                className={`w-full text-left px-4 py-2 text-sm flex items-center justify-between ${
+                  !selectedCategory
                     ? 'bg-blue-600 text-white'
-                    : 'text-gray-400 hover:bg-gray-800'
+                    : 'text-gray-400 hover:bg-gray-800 hover:text-white'
                 }`}
               >
-                <span className="truncate">{cat.category_name}</span>
-                <ChevronRight className="w-4 h-4 flex-shrink-0" />
+                <span>All Channels</span>
+                {!selectedCategory && <ChevronRight className="w-4 h-4" />}
               </button>
-            ))}
-          </div>
-        )}
-
-        {/* Content Area */}
-        <div className="flex-1 overflow-y-auto p-4">
-          {/* Live TV */}
-          {activeTab === 'live' && (
-            <div
-              className={
-                viewMode === 'grid'
-                  ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3'
-                  : 'flex flex-col gap-2'
-              }
-            >
-              {filteredLiveStreams.map((stream) => (
-                <ChannelCard
-                  key={stream.stream_id}
-                  name={stream.name}
-                  logo={stream.stream_icon}
-                  viewMode={viewMode}
-                  onClick={() =>
-                    credentials?.type === 'xtream' ? handlePlayLive(stream) : handlePlayM3U(stream)
-                  }
-                />
-              ))}
-            </div>
-          )}
-
-          {/* VOD */}
-          {activeTab === 'vod' && (
-            <div
-              className={
-                viewMode === 'grid'
-                  ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3'
-                  : 'flex flex-col gap-2'
-              }
-            >
-              {filteredVodStreams.map((stream) => (
-                <MovieCard
-                  key={stream.stream_id}
-                  name={stream.name}
-                  poster={stream.stream_icon}
-                  rating={stream.rating_5based}
-                  viewMode={viewMode}
-                  onClick={() => handlePlayVod(stream)}
-                />
-              ))}
-            </div>
-          )}
-
-          {/* Series */}
-          {activeTab === 'series' && (
-            <div
-              className={
-                viewMode === 'grid'
-                  ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3'
-                  : 'flex flex-col gap-2'
-              }
-            >
-              {filteredSeries.map((s) => (
-                <MovieCard
-                  key={s.series_id}
-                  name={s.name}
-                  poster={s.cover}
-                  rating={s.rating_5based}
-                  viewMode={viewMode}
+              {categories.map((cat) => (
+                <button
+                  key={cat.category_id}
                   onClick={() => {
-                    // TODO: Open series detail modal
+                    setSelectedCategory(cat.category_id);
+                    setShowCategories(false);
                   }}
-                />
-              ))}
-            </div>
-          )}
-
-          {/* Favorites */}
-          {activeTab === 'favorites' && (
-            <div>
-              {favorites.length === 0 ? (
-                <div className="text-center py-12">
-                  <Heart className="w-12 h-12 text-gray-600 mx-auto mb-4" />
-                  <p className="text-gray-500">No favorites yet</p>
-                  <p className="text-gray-600 text-sm">Click the heart icon on any channel to add it</p>
-                </div>
-              ) : (
-                <div
-                  className={
-                    viewMode === 'grid'
-                      ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3'
-                      : 'flex flex-col gap-2'
-                  }
+                  className={`w-full text-left px-4 py-2 text-sm flex items-center justify-between ${
+                    selectedCategory === cat.category_id
+                      ? 'bg-blue-600 text-white'
+                      : 'text-gray-400 hover:bg-gray-800 hover:text-white'
+                  }`}
                 >
-                  {favorites.map((fav) => (
-                    <ChannelCard
-                      key={`${fav.type}-${fav.streamId}`}
-                      name={fav.name}
-                      logo={fav.logo}
-                      viewMode={viewMode}
-                      onClick={() => {
-                        if (!credentials || credentials.type !== 'xtream') return;
-                        const api = new XtreamAPI(credentials);
-                        let url = '';
-                        if (fav.type === 'live') {
-                          url = api.getLiveStreamUrl(fav.streamId);
-                        } else if (fav.type === 'vod') {
-                          url = api.getVodStreamUrl(fav.streamId);
-                        }
-                        playStream({
-                          streamId: fav.streamId,
-                          name: fav.name,
-                          url,
-                          type: fav.type,
-                          logo: fav.logo,
-                        });
-                      }}
-                    />
-                  ))}
-                </div>
-              )}
-
-              {/* Recent History */}
-              {watchHistory.length > 0 && (
-                <div className="mt-8">
-                  <h3 className="text-white text-lg font-medium mb-4 flex items-center gap-2">
-                    <Clock className="w-5 h-5" />
-                    Recently Watched
-                  </h3>
-                  <div
-                    className={
-                      viewMode === 'grid'
-                        ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3'
-                        : 'flex flex-col gap-2'
-                    }
-                  >
-                    {watchHistory.slice(0, 12).map((item) => (
-                      <ChannelCard
-                        key={`${item.type}-${item.streamId}-${item.watchedAt}`}
-                        name={item.name}
-                        logo={item.logo}
-                        viewMode={viewMode}
-                        onClick={() => {
-                          if (!credentials || credentials.type !== 'xtream') return;
-                          const api = new XtreamAPI(credentials);
-                          let url = '';
-                          if (item.type === 'live') {
-                            url = api.getLiveStreamUrl(item.streamId);
-                          } else if (item.type === 'vod') {
-                            url = api.getVodStreamUrl(item.streamId);
-                          }
-                          playStream({
-                            streamId: item.streamId,
-                            name: item.name,
-                            url,
-                            type: item.type,
-                            logo: item.logo,
-                          });
-                        }}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
+                  <span className="truncate pr-2">{cat.category_name}</span>
+                  {selectedCategory === cat.category_id && (
+                    <ChevronRight className="w-4 h-4 flex-shrink-0" />
+                  )}
+                </button>
+              ))}
             </div>
           )}
         </div>
+      )}
+
+      {/* Content Area - Scrollable Channel List */}
+      <div className="flex-1 overflow-y-auto">
+        {isLoading ? (
+          <div className="flex items-center justify-center h-32">
+            <Loader2 className="w-6 h-6 text-blue-500 animate-spin" />
+          </div>
+        ) : (
+          <>
+            {/* Live TV */}
+            {activeTab === 'live' && (
+              <div className="divide-y divide-gray-800">
+                {filteredLiveStreams.length === 0 ? (
+                  <div className="p-8 text-center text-gray-500">
+                    {searchQuery ? 'No channels match your search' : 'No channels available'}
+                  </div>
+                ) : (
+                  filteredLiveStreams.map((stream) => (
+                    <ChannelRow
+                      key={stream.stream_id}
+                      name={stream.name}
+                      logo={stream.stream_icon}
+                      onClick={() =>
+                        credentials?.type === 'xtream'
+                          ? handlePlayLive(stream)
+                          : handlePlayM3U(stream)
+                      }
+                    />
+                  ))
+                )}
+              </div>
+            )}
+
+            {/* VOD */}
+            {activeTab === 'vod' && (
+              <div className="divide-y divide-gray-800">
+                {filteredVodStreams.length === 0 ? (
+                  <div className="p-8 text-center text-gray-500">
+                    {searchQuery ? 'No movies match your search' : 'No movies available'}
+                  </div>
+                ) : (
+                  filteredVodStreams.map((stream) => (
+                    <MovieRow
+                      key={stream.stream_id}
+                      name={stream.name}
+                      poster={stream.stream_icon}
+                      rating={stream.rating_5based}
+                      onClick={() => handlePlayVod(stream)}
+                    />
+                  ))
+                )}
+              </div>
+            )}
+
+            {/* Series */}
+            {activeTab === 'series' && (
+              <div className="divide-y divide-gray-800">
+                {filteredSeries.length === 0 ? (
+                  <div className="p-8 text-center text-gray-500">
+                    {searchQuery ? 'No series match your search' : 'No series available'}
+                  </div>
+                ) : (
+                  filteredSeries.map((s) => (
+                    <MovieRow
+                      key={s.series_id}
+                      name={s.name}
+                      poster={s.cover}
+                      rating={s.rating_5based}
+                      onClick={() => {
+                        // TODO: Open series detail modal
+                      }}
+                    />
+                  ))
+                )}
+              </div>
+            )}
+
+            {/* Favorites */}
+            {activeTab === 'favorites' && (
+              <div>
+                {favorites.length === 0 && watchHistory.length === 0 ? (
+                  <div className="p-8 text-center">
+                    <Heart className="w-12 h-12 text-gray-600 mx-auto mb-4" />
+                    <p className="text-gray-500">No favorites yet</p>
+                    <p className="text-gray-600 text-sm mt-1">
+                      Click the heart icon on any channel to add it
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    {favorites.length > 0 && (
+                      <div>
+                        <div className="px-3 py-2 text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-800/50">
+                          Favorites
+                        </div>
+                        <div className="divide-y divide-gray-800">
+                          {favorites.map((fav) => (
+                            <ChannelRow
+                              key={`${fav.type}-${fav.streamId}`}
+                              name={fav.name}
+                              logo={fav.logo}
+                              onClick={() => {
+                                if (!credentials || credentials.type !== 'xtream') return;
+                                const api = new XtreamAPI(credentials);
+                                let url = '';
+                                if (fav.type === 'live') {
+                                  url = api.getLiveStreamUrl(fav.streamId);
+                                } else if (fav.type === 'vod') {
+                                  url = api.getVodStreamUrl(fav.streamId);
+                                }
+                                playStream({
+                                  streamId: fav.streamId,
+                                  name: fav.name,
+                                  url,
+                                  type: fav.type,
+                                  logo: fav.logo,
+                                });
+                              }}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {watchHistory.length > 0 && (
+                      <div>
+                        <div className="px-3 py-2 text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-800/50 flex items-center gap-2">
+                          <Clock className="w-3 h-3" />
+                          Recently Watched
+                        </div>
+                        <div className="divide-y divide-gray-800">
+                          {watchHistory.slice(0, 20).map((item) => (
+                            <ChannelRow
+                              key={`${item.type}-${item.streamId}-${item.watchedAt}`}
+                              name={item.name}
+                              logo={item.logo}
+                              onClick={() => {
+                                if (!credentials || credentials.type !== 'xtream') return;
+                                const api = new XtreamAPI(credentials);
+                                let url = '';
+                                if (item.type === 'live') {
+                                  url = api.getLiveStreamUrl(item.streamId);
+                                } else if (item.type === 'vod') {
+                                  url = api.getVodStreamUrl(item.streamId);
+                                }
+                                playStream({
+                                  streamId: item.streamId,
+                                  name: item.name,
+                                  url,
+                                  type: item.type,
+                                  logo: item.logo,
+                                });
+                              }}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Channel count */}
+      <div className="flex-shrink-0 px-3 py-2 border-t border-gray-800 text-xs text-gray-500">
+        {activeTab === 'live' && `${filteredLiveStreams.length} channels`}
+        {activeTab === 'vod' && `${filteredVodStreams.length} movies`}
+        {activeTab === 'series' && `${filteredSeries.length} series`}
+        {activeTab === 'favorites' && `${favorites.length} favorites`}
       </div>
     </div>
   );
 }
 
-function ChannelCard({
+// Simple text-based channel row
+function ChannelRow({
   name,
   logo,
-  viewMode,
   onClick,
 }: {
   name: string;
   logo?: string;
-  viewMode: ViewMode;
   onClick: () => void;
 }) {
-  if (viewMode === 'list') {
-    return (
-      <button
-        onClick={onClick}
-        className="flex items-center gap-3 p-3 bg-gray-800/50 hover:bg-gray-700 rounded-lg transition-colors text-left group"
-      >
-        <div className="w-12 h-12 bg-gray-700 rounded-lg flex items-center justify-center overflow-hidden flex-shrink-0">
-          {logo ? (
-            <img src={logo} alt="" className="w-full h-full object-contain" />
-          ) : (
-            <Tv className="w-6 h-6 text-gray-500" />
-          )}
-        </div>
-        <span className="text-white text-sm truncate flex-1">{name}</span>
-        <Play className="w-5 h-5 text-gray-500 group-hover:text-blue-400 flex-shrink-0" />
-      </button>
-    );
-  }
-
   return (
     <button
       onClick={onClick}
-      className="flex flex-col items-center p-3 bg-gray-800/50 hover:bg-gray-700 rounded-lg transition-colors group"
+      className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-gray-800 transition-colors text-left group"
     >
-      <div className="w-16 h-16 bg-gray-700 rounded-lg flex items-center justify-center overflow-hidden mb-2">
-        {logo ? (
-          <img src={logo} alt="" className="w-full h-full object-contain" />
-        ) : (
-          <Tv className="w-8 h-8 text-gray-500" />
-        )}
-      </div>
-      <span className="text-white text-xs text-center truncate w-full">{name}</span>
+      {logo ? (
+        <img
+          src={logo}
+          alt=""
+          className="w-8 h-8 object-contain rounded flex-shrink-0 bg-gray-800"
+          onError={(e) => {
+            e.currentTarget.style.display = 'none';
+          }}
+        />
+      ) : (
+        <div className="w-8 h-8 bg-gray-800 rounded flex items-center justify-center flex-shrink-0">
+          <Tv className="w-4 h-4 text-gray-600" />
+        </div>
+      )}
+      <span className="text-white text-sm flex-1 truncate">{name}</span>
+      <Play className="w-4 h-4 text-gray-600 group-hover:text-blue-400 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
     </button>
   );
 }
 
-function MovieCard({
+// Movie/Series row with optional rating
+function MovieRow({
   name,
   poster,
   rating,
-  viewMode,
   onClick,
 }: {
   name: string;
   poster?: string;
   rating?: number;
-  viewMode: ViewMode;
   onClick: () => void;
 }) {
-  if (viewMode === 'list') {
-    return (
-      <button
-        onClick={onClick}
-        className="flex items-center gap-3 p-3 bg-gray-800/50 hover:bg-gray-700 rounded-lg transition-colors text-left group"
-      >
-        <div className="w-16 h-24 bg-gray-700 rounded-lg flex items-center justify-center overflow-hidden flex-shrink-0">
-          {poster ? (
-            <img src={poster} alt="" className="w-full h-full object-cover" />
-          ) : (
-            <Film className="w-8 h-8 text-gray-500" />
-          )}
-        </div>
-        <div className="flex-1 min-w-0">
-          <span className="text-white text-sm block truncate">{name}</span>
-          {rating && rating > 0 && (
-            <div className="flex items-center gap-1 mt-1">
-              <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
-              <span className="text-gray-400 text-xs">{rating.toFixed(1)}</span>
-            </div>
-          )}
-        </div>
-        <Play className="w-5 h-5 text-gray-500 group-hover:text-blue-400 flex-shrink-0" />
-      </button>
-    );
-  }
-
   return (
     <button
       onClick={onClick}
-      className="flex flex-col bg-gray-800/50 hover:bg-gray-700 rounded-lg overflow-hidden transition-colors group"
+      className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-gray-800 transition-colors text-left group"
     >
-      <div className="aspect-[2/3] bg-gray-700 flex items-center justify-center overflow-hidden">
-        {poster ? (
-          <img src={poster} alt="" className="w-full h-full object-cover" />
-        ) : (
-          <Film className="w-12 h-12 text-gray-500" />
-        )}
-      </div>
-      <div className="p-2">
-        <span className="text-white text-xs truncate block">{name}</span>
+      {poster ? (
+        <img
+          src={poster}
+          alt=""
+          className="w-10 h-14 object-cover rounded flex-shrink-0 bg-gray-800"
+          onError={(e) => {
+            e.currentTarget.style.display = 'none';
+          }}
+        />
+      ) : (
+        <div className="w-10 h-14 bg-gray-800 rounded flex items-center justify-center flex-shrink-0">
+          <Film className="w-5 h-5 text-gray-600" />
+        </div>
+      )}
+      <div className="flex-1 min-w-0">
+        <span className="text-white text-sm block truncate">{name}</span>
         {rating && rating > 0 && (
-          <div className="flex items-center gap-1 mt-1">
+          <div className="flex items-center gap-1 mt-0.5">
             <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
-            <span className="text-gray-400 text-xs">{rating.toFixed(1)}</span>
+            <span className="text-gray-500 text-xs">{rating.toFixed(1)}</span>
           </div>
         )}
       </div>
+      <Play className="w-4 h-4 text-gray-600 group-hover:text-blue-400 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
     </button>
   );
 }

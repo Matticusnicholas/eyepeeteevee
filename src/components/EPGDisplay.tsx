@@ -71,12 +71,15 @@ export function EPGDrawer({ isOpen, onClose }: EPGDrawerProps) {
   const [selectedChannel, setSelectedChannel] = useState<LiveStream | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Get channels with EPG data
-  const channelsWithEPG = useMemo(() => {
-    return liveStreams.filter(
-      (stream) => stream.epg_channel_id && epgData[stream.epg_channel_id]?.length > 0
-    );
-  }, [liveStreams, epgData]);
+  // Get all channels (show all, even without EPG data)
+  const allChannels = useMemo(() => {
+    return liveStreams;
+  }, [liveStreams]);
+
+  // Check if channel has EPG data
+  const hasEPGData = (stream: LiveStream): boolean => {
+    return !!(stream.epg_channel_id && epgData[stream.epg_channel_id]?.length > 0);
+  };
 
   // Auto-select current channel
   useEffect(() => {
@@ -145,36 +148,28 @@ export function EPGDrawer({ isOpen, onClose }: EPGDrawerProps) {
 
         {/* Content */}
         <div className="flex-1 flex overflow-hidden">
-          {/* Channel List */}
-          <div className="w-32 sm:w-40 border-r border-gray-800 overflow-y-auto flex-shrink-0">
-            {channelsWithEPG.length > 0 ? (
-              channelsWithEPG.map((stream) => (
+          {/* Channel List - Shows ALL channels */}
+          <div className="w-40 sm:w-48 border-r border-gray-800 overflow-y-auto flex-shrink-0">
+            {allChannels.length > 0 ? (
+              allChannels.map((stream) => (
                 <button
                   key={stream.stream_id}
                   onClick={() => setSelectedChannel(stream)}
-                  className={`w-full p-2 flex items-center gap-2 text-left transition-colors ${
+                  className={`w-full px-3 py-2 flex items-center gap-2 text-left transition-colors ${
                     selectedChannel?.stream_id === stream.stream_id
                       ? 'bg-blue-600 text-white'
                       : 'text-gray-300 hover:bg-gray-800'
                   }`}
                 >
-                  {stream.stream_icon ? (
-                    <img
-                      src={stream.stream_icon}
-                      alt=""
-                      className="w-8 h-8 object-contain flex-shrink-0"
-                    />
-                  ) : (
-                    <div className="w-8 h-8 bg-gray-700 rounded flex items-center justify-center flex-shrink-0">
-                      <Tv className="w-4 h-4 text-gray-500" />
-                    </div>
+                  <span className="text-sm truncate flex-1">{stream.name}</span>
+                  {hasEPGData(stream) && (
+                    <Clock className="w-3 h-3 text-gray-500 flex-shrink-0" />
                   )}
-                  <span className="text-xs truncate">{stream.name}</span>
                 </button>
               ))
             ) : (
               <div className="p-4 text-center">
-                <p className="text-gray-500 text-sm">No EPG data</p>
+                <p className="text-gray-500 text-sm">No channels</p>
               </div>
             )}
           </div>
