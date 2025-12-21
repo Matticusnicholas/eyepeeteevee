@@ -29,6 +29,8 @@ export default function VideoPlayer({ stream, index, isMain = false, onClose }: 
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaErrorCountRef = useRef(0);
+  const networkErrorCountRef = useRef(0);
 
   const [isPlaying, setIsPlaying] = useState(true);
   const [isMuted, setIsMuted] = useState(false);
@@ -70,12 +72,27 @@ export default function VideoPlayer({ stream, index, isMain = false, onClose }: 
       const isHLS = stream.url.includes('.m3u8') || stream.url.includes('/live/');
 
       if (isHLS && Hls.isSupported()) {
+        // Reset error counters for new stream
+        mediaErrorCountRef.current = 0;
+        networkErrorCountRef.current = 0;
+
         const hls = new Hls({
           enableWorker: true,
-          lowLatencyMode: true,
+          lowLatencyMode: false, // Disable for more stable playback
           backBufferLength: 90,
-          maxBufferLength: 30,
-          maxMaxBufferLength: 60,
+          maxBufferLength: 60,
+          maxMaxBufferLength: 120,
+          maxBufferSize: 60 * 1000 * 1000, // 60MB buffer
+          maxBufferHole: 0.5, // Allow small gaps in buffer
+          highBufferWatchdogPeriod: 2, // Less aggressive buffer monitoring
+          nudgeOffset: 0.1, // Small nudge when stuck
+          nudgeMaxRetry: 5, // Retry nudging before error
+          fragLoadingTimeOut: 20000, // 20s timeout for fragments
+          fragLoadingMaxRetry: 6, // More retries for fragments
+          manifestLoadingTimeOut: 15000, // 15s for manifest
+          manifestLoadingMaxRetry: 4,
+          levelLoadingTimeOut: 15000,
+          levelLoadingMaxRetry: 4,
         });
 
         hls.loadSource(stream.url);
@@ -84,21 +101,49 @@ export default function VideoPlayer({ stream, index, isMain = false, onClose }: 
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           video.play().catch(() => {});
           setIsBuffering(false);
+          setError(null);
+          mediaErrorCountRef.current = 0;
+          networkErrorCountRef.current = 0;
+        });
+
+        hls.on(Hls.Events.FRAG_LOADED, () => {
+          // Clear any error state when fragments load successfully
+          if (error) setError(null);
+          mediaErrorCountRef.current = 0;
+          networkErrorCountRef.current = 0;
         });
 
         hls.on(Hls.Events.ERROR, (_, data) => {
+          console.log('HLS Error:', data.type, data.details, 'Fatal:', data.fatal);
+
           if (data.fatal) {
             switch (data.type) {
               case Hls.ErrorTypes.NETWORK_ERROR:
-                setError('Network error - retrying...');
-                hls.startLoad();
+                networkErrorCountRef.current++;
+                if (networkErrorCountRef.current > 3) {
+                  setError('Network error - click retry');
+                } else {
+                  // Silently retry network errors
+                  setTimeout(() => hls.startLoad(), 1000);
+                }
                 break;
               case Hls.ErrorTypes.MEDIA_ERROR:
-                setError('Media error - recovering...');
-                hls.recoverMediaError();
+                mediaErrorCountRef.current++;
+                if (mediaErrorCountRef.current > 5) {
+                  // Give up after 5 attempts
+                  setError('Media error - click retry');
+                } else if (mediaErrorCountRef.current > 3) {
+                  // After 3 failed recoveries, try swapping codec
+                  console.log('Multiple media errors, trying swap audio codec');
+                  hls.swapAudioCodec();
+                  hls.recoverMediaError();
+                } else {
+                  // Silently recover media errors
+                  hls.recoverMediaError();
+                }
                 break;
               default:
-                setError('Playback error');
+                setError('Playback error - click retry');
                 break;
             }
           }
