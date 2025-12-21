@@ -161,6 +161,8 @@ export interface ActiveStream {
   url: string;
   type: 'live' | 'vod' | 'series';
   logo?: string;
+  // Fallback URLs for different formats
+  fallbackUrls?: string[];
 }
 
 export interface FavoriteChannel {

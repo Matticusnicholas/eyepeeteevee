@@ -9,12 +9,12 @@ import {
   Volume2,
   VolumeX,
   Maximize,
-  Minimize,
   X,
   Heart,
   Circle,
   Download,
-  Settings,
+  RefreshCw,
+  AlertTriangle,
 } from 'lucide-react';
 import type { ActiveStream } from '@/types';
 
@@ -29,8 +29,13 @@ export default function VideoPlayer({ stream, index, isMain = false, onClose }: 
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+
+  // Error tracking refs (don't cause re-renders)
   const mediaErrorCountRef = useRef(0);
   const networkErrorCountRef = useRef(0);
+  const currentUrlIndexRef = useRef(0);
+  const lastSuccessTimeRef = useRef(Date.now());
+  const isRecoveringRef = useRef(false);
 
   const [isPlaying, setIsPlaying] = useState(true);
   const [isMuted, setIsMuted] = useState(false);
@@ -38,6 +43,9 @@ export default function VideoPlayer({ stream, index, isMain = false, onClose }: 
   const [showControls, setShowControls] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isBuffering, setIsBuffering] = useState(true);
+  const [currentUrl, setCurrentUrl] = useState(stream.url);
+  const [hasAudioIssue, setHasAudioIssue] = useState(false);
+  const [streamFormat, setStreamFormat] = useState<'m3u8' | 'ts'>('m3u8');
 
   const {
     isRecording,
@@ -53,123 +61,259 @@ export default function VideoPlayer({ stream, index, isMain = false, onClose }: 
 
   const isFavorite = favorites.some((f) => f.streamId === stream.streamId && f.type === stream.type);
 
+  // Get all available URLs for this stream
+  const getAllUrls = useCallback(() => {
+    const urls = [stream.url];
+    if (stream.fallbackUrls) {
+      urls.push(...stream.fallbackUrls);
+    }
+    return urls;
+  }, [stream.url, stream.fallbackUrls]);
+
+  // Try the next available URL
+  const tryNextUrl = useCallback(() => {
+    const urls = getAllUrls();
+    currentUrlIndexRef.current = (currentUrlIndexRef.current + 1) % urls.length;
+    const nextUrl = urls[currentUrlIndexRef.current];
+    console.log(`Trying fallback URL (${currentUrlIndexRef.current + 1}/${urls.length}):`, nextUrl);
+    setCurrentUrl(nextUrl);
+    setStreamFormat(nextUrl.includes('.ts') ? 'ts' : 'm3u8');
+    return nextUrl;
+  }, [getAllUrls]);
+
+  // Reset to first URL
+  const resetToFirstUrl = useCallback(() => {
+    currentUrlIndexRef.current = 0;
+    setCurrentUrl(stream.url);
+    setStreamFormat(stream.url.includes('.ts') ? 'ts' : 'm3u8');
+  }, [stream.url]);
+
   // Initialize HLS player
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !stream.url) return;
+    if (!video || !currentUrl) return;
 
     setError(null);
     setIsBuffering(true);
+    setHasAudioIssue(false);
 
-    const initPlayer = () => {
-      // Cleanup previous instance
+    const destroyHls = () => {
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
       }
+    };
 
-      // Check if it's an HLS stream
-      const isHLS = stream.url.includes('.m3u8') || stream.url.includes('/live/');
+    const initPlayer = () => {
+      destroyHls();
 
-      if (isHLS && Hls.isSupported()) {
-        // Reset error counters for new stream
-        mediaErrorCountRef.current = 0;
-        networkErrorCountRef.current = 0;
+      // Reset error counters for new stream
+      mediaErrorCountRef.current = 0;
+      networkErrorCountRef.current = 0;
+      isRecoveringRef.current = false;
 
+      // Check if it's an HLS stream (.m3u8) or MPEG-TS (.ts)
+      const isHLS = currentUrl.includes('.m3u8');
+      const isMpegTS = currentUrl.includes('.ts') || currentUrl.includes('/live/');
+
+      if (Hls.isSupported() && (isHLS || isMpegTS)) {
         const hls = new Hls({
           enableWorker: true,
-          lowLatencyMode: false, // Disable for more stable playback
+          lowLatencyMode: false,
           backBufferLength: 90,
           maxBufferLength: 60,
           maxMaxBufferLength: 120,
-          maxBufferSize: 60 * 1000 * 1000, // 60MB buffer
-          maxBufferHole: 0.5, // Allow small gaps in buffer
-          highBufferWatchdogPeriod: 2, // Less aggressive buffer monitoring
-          nudgeOffset: 0.1, // Small nudge when stuck
-          nudgeMaxRetry: 5, // Retry nudging before error
-          fragLoadingTimeOut: 20000, // 20s timeout for fragments
-          fragLoadingMaxRetry: 6, // More retries for fragments
-          manifestLoadingTimeOut: 15000, // 15s for manifest
-          manifestLoadingMaxRetry: 4,
-          levelLoadingTimeOut: 15000,
-          levelLoadingMaxRetry: 4,
+          maxBufferSize: 60 * 1000 * 1000,
+          maxBufferHole: 0.5,
+          highBufferWatchdogPeriod: 3,
+          nudgeOffset: 0.2,
+          nudgeMaxRetry: 10,
+          fragLoadingTimeOut: 30000,
+          fragLoadingMaxRetry: 8,
+          manifestLoadingTimeOut: 20000,
+          manifestLoadingMaxRetry: 6,
+          levelLoadingTimeOut: 20000,
+          levelLoadingMaxRetry: 6,
+          // Less strict stall handling
+          maxStarvationDelay: 4,
+          maxLoadingDelay: 4,
+          // Audio handling
+          audioPreference: { characteristics: [] },
         });
 
-        hls.loadSource(stream.url);
+        hls.loadSource(currentUrl);
         hls.attachMedia(video);
 
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
+          console.log('Manifest parsed, levels:', data.levels.length);
           video.play().catch(() => {});
           setIsBuffering(false);
           setError(null);
-          mediaErrorCountRef.current = 0;
-          networkErrorCountRef.current = 0;
+          lastSuccessTimeRef.current = Date.now();
+
+          // Check for audio tracks
+          if (data.levels.length > 0) {
+            const level = data.levels[0];
+            if (!level.audioCodec) {
+              console.warn('No audio codec detected in stream');
+            }
+          }
         });
 
         hls.on(Hls.Events.FRAG_LOADED, () => {
-          // Clear any error state when fragments load successfully
+          // Successfully loaded a fragment - stream is working
+          lastSuccessTimeRef.current = Date.now();
           if (error) setError(null);
-          mediaErrorCountRef.current = 0;
-          networkErrorCountRef.current = 0;
+          if (isRecoveringRef.current) {
+            isRecoveringRef.current = false;
+            mediaErrorCountRef.current = 0;
+            networkErrorCountRef.current = 0;
+          }
+        });
+
+        hls.on(Hls.Events.FRAG_PLAYING, () => {
+          setIsBuffering(false);
+        });
+
+        hls.on(Hls.Events.AUDIO_TRACK_LOADED, (_, data) => {
+          console.log('Audio track loaded:', data);
         });
 
         hls.on(Hls.Events.ERROR, (_, data) => {
-          console.log('HLS Error:', data.type, data.details, 'Fatal:', data.fatal);
+          const timeSinceSuccess = Date.now() - lastSuccessTimeRef.current;
+          console.log('HLS Error:', {
+            type: data.type,
+            details: data.details,
+            fatal: data.fatal,
+            timeSinceSuccess,
+            mediaErrors: mediaErrorCountRef.current,
+            networkErrors: networkErrorCountRef.current,
+          });
 
-          if (data.fatal) {
-            switch (data.type) {
-              case Hls.ErrorTypes.NETWORK_ERROR:
-                networkErrorCountRef.current++;
-                if (networkErrorCountRef.current > 3) {
-                  setError('Network error - click retry');
+          // Non-fatal errors - just log them
+          if (!data.fatal) {
+            return;
+          }
+
+          isRecoveringRef.current = true;
+
+          switch (data.type) {
+            case Hls.ErrorTypes.NETWORK_ERROR:
+              networkErrorCountRef.current++;
+
+              if (networkErrorCountRef.current > 5) {
+                // Try fallback URL if available
+                const urls = getAllUrls();
+                if (urls.length > 1 && currentUrlIndexRef.current < urls.length - 1) {
+                  console.log('Network errors persisting, trying fallback URL...');
+                  tryNextUrl();
                 } else {
-                  // Silently retry network errors
-                  setTimeout(() => hls.startLoad(), 1000);
+                  setError('Stream unavailable');
                 }
-                break;
-              case Hls.ErrorTypes.MEDIA_ERROR:
-                mediaErrorCountRef.current++;
-                if (mediaErrorCountRef.current > 5) {
-                  // Give up after 5 attempts
-                  setError('Media error - click retry');
-                } else if (mediaErrorCountRef.current > 3) {
-                  // After 3 failed recoveries, try swapping codec
-                  console.log('Multiple media errors, trying swap audio codec');
-                  hls.swapAudioCodec();
-                  hls.recoverMediaError();
+              } else {
+                // Retry with backoff
+                const delay = Math.min(1000 * networkErrorCountRef.current, 5000);
+                setTimeout(() => {
+                  if (hlsRef.current) {
+                    hlsRef.current.startLoad();
+                  }
+                }, delay);
+              }
+              break;
+
+            case Hls.ErrorTypes.MEDIA_ERROR:
+              mediaErrorCountRef.current++;
+
+              if (mediaErrorCountRef.current > 8) {
+                // Try fallback URL
+                const urls = getAllUrls();
+                if (urls.length > 1 && currentUrlIndexRef.current < urls.length - 1) {
+                  console.log('Media errors persisting, trying fallback URL...');
+                  tryNextUrl();
                 } else {
-                  // Silently recover media errors
-                  hls.recoverMediaError();
+                  setError('Playback error');
                 }
-                break;
-              default:
-                setError('Playback error - click retry');
-                break;
-            }
+              } else if (mediaErrorCountRef.current > 4) {
+                // Try swapping audio codec
+                console.log('Trying audio codec swap...');
+                hls.swapAudioCodec();
+                hls.recoverMediaError();
+              } else {
+                // Standard recovery
+                hls.recoverMediaError();
+              }
+              break;
+
+            default:
+              // For other fatal errors, try fallback
+              const urls = getAllUrls();
+              if (urls.length > 1 && currentUrlIndexRef.current < urls.length - 1) {
+                tryNextUrl();
+              } else {
+                setError('Playback error');
+              }
+              break;
           }
         });
 
         hlsRef.current = hls;
       } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-        // Safari native HLS support
-        video.src = stream.url;
+        // Safari native HLS
+        video.src = currentUrl;
         video.play().catch(() => {});
+        setIsBuffering(false);
       } else {
-        // Regular video source
-        video.src = stream.url;
-        video.play().catch(() => {});
+        // Direct playback attempt
+        video.src = currentUrl;
+        video.play().catch((e) => {
+          console.error('Direct playback failed:', e);
+          // Try fallback
+          const urls = getAllUrls();
+          if (urls.length > 1 && currentUrlIndexRef.current < urls.length - 1) {
+            tryNextUrl();
+          } else {
+            setError('Unsupported format');
+          }
+        });
       }
     };
 
     initPlayer();
 
-    return () => {
-      if (hlsRef.current) {
-        hlsRef.current.destroy();
-        hlsRef.current = null;
+    return destroyHls;
+  }, [currentUrl, getAllUrls, tryNextUrl, error]);
+
+  // Reset URL index when stream changes
+  useEffect(() => {
+    currentUrlIndexRef.current = 0;
+    setCurrentUrl(stream.url);
+  }, [stream.url, stream.streamId]);
+
+  // Audio issue detection
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    let audioCheckTimer: NodeJS.Timeout;
+
+    const checkAudio = () => {
+      // If video is playing but audio might be missing
+      if (video.currentTime > 2 && !video.muted && video.volume > 0) {
+        // Check if we might have audio codec issues
+        const hls = hlsRef.current;
+        if (hls) {
+          const audioTracks = hls.audioTracks;
+          if (audioTracks.length === 0) {
+            setHasAudioIssue(true);
+          }
+        }
       }
     };
-  }, [stream.url]);
+
+    audioCheckTimer = setTimeout(checkAudio, 5000);
+
+    return () => clearTimeout(audioCheckTimer);
+  }, [currentUrl]);
 
   // Recording functionality
   useEffect(() => {
@@ -178,8 +322,8 @@ export default function VideoPlayer({ stream, index, isMain = false, onClose }: 
 
     if (isRecording && isMain) {
       try {
-        const stream = (video as HTMLVideoElement & { captureStream: () => MediaStream }).captureStream();
-        const mediaRecorder = new MediaRecorder(stream, {
+        const captureStream = (video as HTMLVideoElement & { captureStream: () => MediaStream }).captureStream();
+        const mediaRecorder = new MediaRecorder(captureStream, {
           mimeType: 'video/webm;codecs=vp9',
         });
 
@@ -189,7 +333,7 @@ export default function VideoPlayer({ stream, index, isMain = false, onClose }: 
           }
         };
 
-        mediaRecorder.start(1000); // Capture every second
+        mediaRecorder.start(1000);
         mediaRecorderRef.current = mediaRecorder;
       } catch (err) {
         console.error('Recording not supported:', err);
@@ -213,17 +357,29 @@ export default function VideoPlayer({ stream, index, isMain = false, onClose }: 
     if (!video) return;
 
     const handleWaiting = () => setIsBuffering(true);
-    const handlePlaying = () => setIsBuffering(false);
+    const handlePlaying = () => {
+      setIsBuffering(false);
+      setIsPlaying(true);
+    };
     const handleCanPlay = () => setIsBuffering(false);
+    const handlePause = () => setIsPlaying(false);
+    const handleError = () => {
+      // Native video element error
+      console.log('Video element error:', video.error);
+    };
 
     video.addEventListener('waiting', handleWaiting);
     video.addEventListener('playing', handlePlaying);
     video.addEventListener('canplay', handleCanPlay);
+    video.addEventListener('pause', handlePause);
+    video.addEventListener('error', handleError);
 
     return () => {
       video.removeEventListener('waiting', handleWaiting);
       video.removeEventListener('playing', handlePlaying);
       video.removeEventListener('canplay', handleCanPlay);
+      video.removeEventListener('pause', handlePause);
+      video.removeEventListener('error', handleError);
     };
   }, []);
 
@@ -302,6 +458,24 @@ export default function VideoPlayer({ stream, index, isMain = false, onClose }: 
     }
   }, [isRecording, startRecording, stopRecording, downloadRecording]);
 
+  const handleRetry = useCallback(() => {
+    setError(null);
+    mediaErrorCountRef.current = 0;
+    networkErrorCountRef.current = 0;
+
+    // Try next URL or restart from first
+    const urls = getAllUrls();
+    if (currentUrlIndexRef.current >= urls.length - 1) {
+      resetToFirstUrl();
+    } else {
+      tryNextUrl();
+    }
+  }, [getAllUrls, resetToFirstUrl, tryNextUrl]);
+
+  const handleTryAlternateFormat = useCallback(() => {
+    tryNextUrl();
+  }, [tryNextUrl]);
+
   return (
     <div
       className="relative w-full h-full bg-black group"
@@ -317,7 +491,7 @@ export default function VideoPlayer({ stream, index, isMain = false, onClose }: 
       />
 
       {/* Buffering Indicator */}
-      {isBuffering && (
+      {isBuffering && !error && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/50">
           <div className="w-12 h-12 border-4 border-white/30 border-t-white rounded-full animate-spin" />
         </div>
@@ -326,20 +500,35 @@ export default function VideoPlayer({ stream, index, isMain = false, onClose }: 
       {/* Error Display */}
       {error && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/70">
-          <div className="text-white text-center">
-            <p className="text-red-400 mb-2">{error}</p>
-            <button
-              onClick={() => {
-                setError(null);
-                if (hlsRef.current) {
-                  hlsRef.current.startLoad();
-                }
-              }}
-              className="px-4 py-2 bg-blue-600 rounded hover:bg-blue-700"
-            >
-              Retry
-            </button>
+          <div className="text-white text-center p-4">
+            <AlertTriangle className="w-12 h-12 text-yellow-400 mx-auto mb-3" />
+            <p className="text-red-400 mb-4">{error}</p>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={handleRetry}
+                className="px-4 py-2 bg-blue-600 rounded hover:bg-blue-700 flex items-center justify-center gap-2"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Retry
+              </button>
+              {stream.fallbackUrls && stream.fallbackUrls.length > 0 && (
+                <button
+                  onClick={handleTryAlternateFormat}
+                  className="px-4 py-2 bg-gray-600 rounded hover:bg-gray-700 text-sm"
+                >
+                  Try alternate format
+                </button>
+              )}
+            </div>
           </div>
+        </div>
+      )}
+
+      {/* Audio Issue Warning */}
+      {hasAudioIssue && !error && (
+        <div className="absolute top-12 left-2 bg-yellow-600/90 text-white text-xs px-2 py-1 rounded flex items-center gap-1">
+          <AlertTriangle className="w-3 h-3" />
+          Audio may not be available
         </div>
       )}
 
@@ -356,6 +545,9 @@ export default function VideoPlayer({ stream, index, isMain = false, onClose }: 
           <span className="text-white text-sm font-medium truncate max-w-[200px]">
             {stream.name}
           </span>
+          {streamFormat === 'ts' && (
+            <span className="text-xs text-gray-400">(TS)</span>
+          )}
         </div>
 
         {onClose && (

@@ -103,9 +103,13 @@ export default function ChannelBrowser() {
     const activeStream: ActiveStream = {
       streamId: stream.stream_id,
       name: stream.name,
-      url: api.getLiveStreamUrl(stream.stream_id),
+      url: api.getLiveStreamUrl(stream.stream_id, 'm3u8'),
       type: 'live',
       logo: stream.stream_icon,
+      // Provide fallback URLs in different formats
+      fallbackUrls: [
+        api.getLiveStreamUrl(stream.stream_id, 'ts'),
+      ],
     };
 
     playStream(activeStream);

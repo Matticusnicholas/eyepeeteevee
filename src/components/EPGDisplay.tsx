@@ -111,9 +111,12 @@ export function EPGDrawer({ isOpen, onClose }: EPGDrawerProps) {
     playStream({
       streamId: stream.stream_id,
       name: stream.name,
-      url: api.getLiveStreamUrl(stream.stream_id),
+      url: api.getLiveStreamUrl(stream.stream_id, 'm3u8'),
       type: 'live',
       logo: stream.stream_icon,
+      fallbackUrls: [
+        api.getLiveStreamUrl(stream.stream_id, 'ts'),
+      ],
     });
   };
 
